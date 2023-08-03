@@ -86,6 +86,11 @@ languagesystem kana dflt;
     sub @capture_L @digits' by @capture_L;
 }} CAPTURE;
 
+lookup DOTS_TO_COMMAS {{
+    # YIKES!!
+    {ifdef("phase2_L")} sub @phase2_L {dot_name}' @phase2_R by {comma_name};
+}} DOTS_TO_COMMAS;
+
 lookup GROUP_DIGITS {{
     rsub @capture_L @capture_L @capture_L' @capture_L @capture_L by @group_L;
     rsub @xcapture_L @xcapture_L' @xcapture_L @xcapture_L @xcapture_L by @xgroup_L;
@@ -123,7 +128,7 @@ lookup REFLOW_DIGITS {{
 feature {feature_commas} {{
     lookup CAPTURE;
     lookup GROUP_DIGITS;
-    lookup GROUP_DECIMALS;
+    #lookup GROUP_DECIMALS;
     lookup REFLOW_DIGITS;
     sub @group_L' by @group_L_comma;
 }} {feature_commas};
@@ -131,7 +136,7 @@ feature {feature_commas} {{
 feature {feature_comma_decimals} {{
     lookup CAPTURE;
     lookup GROUP_DIGITS;
-    lookup GROUP_DECIMALS;
+    #lookup GROUP_DECIMALS;
     lookup REFLOW_DIGITS;
     sub @group_L' by @group_L_comma;
     sub @group_R' by @group_R_comma;
@@ -139,21 +144,20 @@ feature {feature_comma_decimals} {{
 
 feature {feature_dots} {{
     lookup CAPTURE;
+    lookup DOTS_TO_COMMAS;
     lookup GROUP_DIGITS;
-    lookup GROUP_DECIMALS;
+    #lookup GROUP_DECIMALS;
     lookup REFLOW_DIGITS;
-    {ifdef("phase2_L")} sub [ @digits @phase2_L ] {dot_name}' [ @digits @phase2_R ] by {comma_name};
-    {ifndf("phase2_L")} sub @digits {dot_name}' @digits by {comma_name};
     sub @group_L' by @group_L_dot;
 }} {feature_dots};
 
 feature {feature_dot_decimals} {{
     lookup CAPTURE;
+    lookup DOTS_TO_COMMAS;
     lookup GROUP_DIGITS;
     lookup GROUP_DECIMALS;
     lookup REFLOW_DIGITS;
-    {ifdef("phase2_L")} sub [ @digits @phase2_L ] {dot_name}' [ @digits @phase2_R ] by {comma_name};
-    {ifndf("phase2_L")} sub @digits {dot_name}' @digits by {comma_name};
+    lookup DOTS_TO_COMMAS;
     sub @group_L' by @group_L_dot;
     sub @group_R' by @group_R_dot;
 }} {feature_dot_decimals};
