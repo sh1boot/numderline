@@ -1,23 +1,58 @@
-# Numderline
+# Numderspace
+Based substantially on [Numderline](https://github.com/trishume/numderline) but
+becoming kind of its own thing as I hack around.
 
-Numderline is a hacky font patcher that takes a font and converts it into one that underlines alternating groups of 3 digits starting from the right. It can also do other similar tricks.
+Allows the rendering of digit grouping (thousand separators) in contexts where
+you have some control over the font but don't want to (or can't) edit the text
+inline.
 
-It was inspired by [my job](https://www.janestreet.com/technology/) involving a lot of staring at numbers in nanoseconds and trying to pick out the milliseconds or microseconds.
+This is achieved by adding font features to font files which enable outboard
+configuration of number formatting.
 
-A blog post about this and a web page to see and download pre-patched fonts should hopefully be coming soon™.
+Provisional names for the features are:
+ - `dgsp` to enable digit grouping with spaces
+ - `dgco` to enable digit grouping of whole numbers with commas
+ - `dgcd` as above, but inserting commas into the decimals as well
+ - `dgdo` to enable digit grouping of whole numbers with dots (and replacing dot with comma, use with caution)
+ - `dgdd` as above, but inserting dots into the decimals as well
 
-## Features
+Used in contexts where these features cannot be switched on externally, it's
+possible to rename the first verison to something which will be enabeld by
+default, like `calt`.
 
-- Patch any font to underline alternating groups of 3 digits in numbers
-- For use in proportional contexts, can also just insert fake commas with shaping
-- Alternatively it can squish digits and group them closer together in threes
-- Or some other variants, including small monospace mini-commas!
+## Usage
+Patch a font to add the extra stuff.  Then, if you have [CSS
+control](https://developer.mozilla.org/en-US/docs/Web/CSS/font-feature-settings)
+over the font, try:
 
-### Usage
+```CSS
+font-feature-settings: "dgsp";
+```
+for the bits you want formatted that way (try to avoid switching it on
+globally, as it may mess other things up).
 
-1. Clone the repo
-1. Install the FontForge Python API, on macOS I used Homebrew to do this with `brew install fontforge`, or you can use `brew bundle`
-1. Install the fonttools API, I used `pip3 install fonttools` to install it in my Homebrew python3, or you can use `pip3 install -r requirements.txt`
-1. Run `python3 patcher.py FONT_FILE_TO_PATCH` and look in the `out` folder
 
-You can also run `python3 patcher.py --help` and read the source to see other options.
+To use it in a terminal (if you have one which supports ligation), you can use
+a monospaced font and pass `--monospace` to the patcher so that it will
+squeeze glyphs appropriately.
+
+Usage might be configured with a line like:
+```
+font=My Font with DigitGrouping:fontfeatures=dgsp
+```
+or
+```
+font_features My-Font-with-DigitGrouping dgsp
+```
+or, in fontconfig:
+```xml
+    <match target="pattern">
+         <test name="family" compare="contains"><string>DigitGrouping</string></test>
+         <edit name="fontfeatures" mode="append">
+             <string>dgsp</string>
+         </edit>
+     </match>
+```
+
+Or if all of that is too much hassle or isn't working out right, just bake it
+in as the default, by passing `--feature-name=calt` to the patcher.

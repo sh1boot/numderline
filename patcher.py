@@ -1,8 +1,10 @@
+#!/usr/bin/env python3
 # Based on https://github.com/powerline/fontpatcher/blob/develop/scripts/powerline-fontpatcher
 # Used under the MIT license
 
 import argparse
 import sys
+import random
 import re
 import subprocess
 import os.path
@@ -25,102 +27,142 @@ except ImportError:
     sys.exit(1)
 
 
-def get_argparser(ArgumentParser=argparse.ArgumentParser):
-    parser = ArgumentParser(
-        description=('Font patcher for Numderline. '
-                     'Requires FontForge with Python bindings. '
-                     'Stores the patched font as a new, renamed font file by default.')
-    )
-    parser.add_argument('target_fonts', help='font files to patch', metavar='font',
-                        nargs='*', type=argparse.FileType('rb'))
-    parser.add_argument('--group',
-                        help='group squished digits in threes, shorthand for --no-underline --shift-amount 100 --squish 0.85 --squish-all',
-                        default=False, action='store_true')
-    parser.add_argument('--no-rename',
-                        help='don\'t add " with Numderline" to the font name',
-                        default=True, action='store_false', dest='rename_font')
-    parser.add_argument('--no-underline',
-                        help='don\'t add underlines',
-                        default=True, action='store_false', dest='add_underlines')
-    parser.add_argument('--no-decimals',
-                        help='don\'t touch digits after the decimal point',
-                        default=True, action='store_false', dest='do_decimals')
-    parser.add_argument('--add-commas',
-                        help='add commas',
-                        default=False, action='store_true')
-    parser.add_argument('--shift-amount', help='amount to shift digits to group them together, try 100', type=int, default=0)
-    parser.add_argument('--squish', help='horizontal scale to apply to the digits to maybe make them more readable when shifted', type=float, default=1.0)
-    parser.add_argument('--squish-all',
-                        help='squish all numbers, including decimals and ones less than 4 digits, use with --squish flag',
-                        default=False, action='store_true')
-    parser.add_argument('--sub-font', help='substitute alternating groups of 3 with this font', type=argparse.FileType('rb'))
-    parser.add_argument('--spaceless-commas',
-                        help='manipulate commas to not change the spacing, for monospace fonts, use with --add-commas',
-                        default=False, action='store_true')
-    parser.add_argument('--debug-annotate',
-                        help='annotate glyph copies with debug digits',
-                        default=False, action='store_true')
-    parser.add_argument('--build-release',
-                        help='build the default release of Numderline',
-                        default=False, action='store_true')
-    return parser
-
-
 FONT_NAME_RE = re.compile(r'^([^-]*)(?:(-.*))?$')
-NUM_DIGIT_COPIES = 7
 
-def gen_feature(digit_names, underscore_name, dot_name, do_decimals):
-    if do_decimals:
-        decimal_sub = """
-    ignore sub {dot_name} {dot_name} @digits';
-    sub {dot_name} @digits' by @nd2;
-    sub @nd2 @digits' by @nd1;
-    sub @nd1 @digits' by @nd6;
-    sub @nd6 @digits' by @nd5;
-    sub @nd5 @digits' by @nd4;
-    sub @nd4 @digits' by @nd3;
-    sub @nd3 @digits' by @nd2;
-"""
-    else:
-        decimal_sub = """
-    ignore sub {dot_name} @digits';
-    sub @digits @digits' by @digits;
-"""
+DECIMAL_LIST = '0123456789'
+HEXADECIMAL_LIST = '0123456789abcdefABCDEF'
 
-    decimal_sub = decimal_sub.format(dot_name=dot_name)
+class deferred_map:
+    def __init__(self, function, sequence):
+        self._f = function
+        self._sequence = sequence
 
-    feature = """
-languagesystem DFLT dflt;
+    def __iter__(self):
+        return map(self._f, self._sequence)
+    def __getitem__(self, i):
+        return self._f(self._sequence[ord(i) if isinstance(i, str) else i])
+
+def gen_feature(names, digit_groups, monospace, feature_name):
+    feature_commas = 'dgco'
+    feature_dots = 'dgdo'
+    feature_comma_decimals = 'dgcd'
+    feature_dot_decimals = 'dgdd'
+
+    dot_name = names['.']
+    comma_name = names[',']
+
+    preamble = f"""languagesystem DFLT dflt;
 languagesystem latn dflt;
 languagesystem cyrl dflt;
 languagesystem grek dflt;
 languagesystem kana dflt;
-@digits=[{digit_names}];
-{nds}
+"""
 
-feature calt {{
-    {decimal_sub}
+    setup = ''.join([ f'@{key}=[{" ".join(value)}];\n' for key, value in digit_groups.items() ])
 
-    sub @digits' @digits @digits @digits by @nd0;
-    sub @nd0 @digits' by @nd0;
+    # a rule to avoid treating `..0` as decimal point captures the first digit,
+    # but actually it may be a part of `..0x` so allow this rule to override
+    # that capture.
+    false_capture = digit_groups['capture_L'][0]
 
-    reversesub @nd0' @nd0 by @nd1;
-    reversesub @nd0' @nd1 by @nd2;
-    reversesub @nd0' @nd2 by @nd3;
-    reversesub @nd0' @nd3 by @nd4;
-    reversesub @nd0' @nd4 by @nd5;
-    reversesub @nd0' @nd5 by @nd6;
-    reversesub @nd0' @nd6 by @nd1;
-}} calt;
-"""[1:]
+    def ifdef(group): return '' if group in digit_groups else '#'
+    def ifndf(group): return '#' if group in digit_groups else ''
 
-    nds = [' '.join(['nd{}.{}'.format(i,j) for j in range(10)]) for i in range(NUM_DIGIT_COPIES)]
-    nds = ['@nd{}=[{}];'.format(i,nds[i]) for i in range(NUM_DIGIT_COPIES)]
-    nds = "\n".join(nds)
-    feature = feature.format(digit_names=' '.join(digit_names),
-        nds=nds, underscore_name=underscore_name, decimal_sub=decimal_sub)
+    m = '' if monospace else '#'
+    not_m = '#' if monospace else ''
+
+    lookups = f"""lookup CAPTURE {{
+    # capture digits following `.`, but not `..`
+    sub {dot_name} {dot_name} @digits' by @capture_L;
+    sub {dot_name} @digits' by @capture_R;
+    sub @capture_R @digits' by @capture_R;
+
+    # capture hex digits following 0x
+    sub [{names['0']} {false_capture}] [{names['x']} {names['X']}] @xdigits' by @xcapture_L;
+    sub @xcapture_L @xdigits' by @xcapture_L;
+
+    # capture digits that didn't match above
+    sub @digits' @digits @digits @digits @digits by @capture_L;
+    sub @capture_L @digits' by @capture_L;
+}} CAPTURE;
+
+lookup GROUP_DIGITS {{
+    rsub @capture_L @capture_L @capture_L' @capture_L @capture_L by @group_L;
+    rsub @xcapture_L @xcapture_L' @xcapture_L @xcapture_L @xcapture_L by @xgroup_L;
+}} GROUP_DIGITS;
+
+lookup GROUP_DECIMALS {{
+    sub [ {dot_name} {comma_name} @group_R ] @capture_R @capture_R @capture_R' @capture_R by @group_R;
+}} GROUP_DECIMALS;
+
+lookup REFLOW_DIGITS {{
+    {ifdef("phase1_L")} sub @group_L @capture_L' by @phase1_L;
+    {ifdef("phase2_L")} sub @phase1_L @capture_L' by @phase2_L;
+    {ifdef("phase3_L")} sub @phase2_L @capture_L' by @phase3_L;
+
+    {ifdef("xphase1_L")} sub @xgroup_L @xcapture_L' by @xphase1_L;
+    {ifdef("xphase2_L")} sub @xphase1_L @xcapture_L' by @xphase2_L;
+    {ifdef("xphase3_L")} sub @xphase2_L @xcapture_L' by @xphase3_L;
+
+    {ifdef("phase2_R")} sub [ @group_R {dot_name} {comma_name} ] @capture_R' by @phase2_R;
+    {ifdef("phase2_R")} sub @phase2_R @capture_R' by @phase1_R;
+
+    sub @capture_L' by @digits;
+    sub @xcapture_L' by @xdigits;
+    sub @capture_R' by @digits;
+}} REFLOW_DIGITS;
+"""
+
+    features = f"""feature {feature_name} {{
+    lookup CAPTURE;
+    lookup GROUP_DIGITS;
+    lookup GROUP_DECIMALS;
+    lookup REFLOW_DIGITS;
+}} {feature_name};
+
+feature {feature_commas} {{
+    lookup CAPTURE;
+    lookup GROUP_DIGITS;
+    lookup GROUP_DECIMALS;
+    lookup REFLOW_DIGITS;
+    sub @group_L' by @group_L_comma;
+}} {feature_commas};
+
+feature {feature_comma_decimals} {{
+    lookup CAPTURE;
+    lookup GROUP_DIGITS;
+    lookup GROUP_DECIMALS;
+    lookup REFLOW_DIGITS;
+    sub @group_L' by @group_L_comma;
+    sub @group_R' by @group_R_comma;
+}} {feature_comma_decimals};
+
+feature {feature_dots} {{
+    lookup CAPTURE;
+    lookup GROUP_DIGITS;
+    lookup GROUP_DECIMALS;
+    lookup REFLOW_DIGITS;
+    {ifdef("phase2_L")} sub [ @digits @phase2_L ] {dot_name}' [ @digits @phase2_R ] by {comma_name};
+    {ifndf("phase2_L")} sub @digits {dot_name}' @digits by {comma_name};
+    sub @group_L' by @group_L_dot;
+}} {feature_dots};
+
+feature {feature_dot_decimals} {{
+    lookup CAPTURE;
+    lookup GROUP_DIGITS;
+    lookup GROUP_DECIMALS;
+    lookup REFLOW_DIGITS;
+    {ifdef("phase2_L")} sub [ @digits @phase2_L ] {dot_name}' [ @digits @phase2_R ] by {comma_name};
+    {ifndf("phase2_L")} sub @digits {dot_name}' @digits by {comma_name};
+    sub @group_L' by @group_L_dot;
+    sub @group_R' by @group_R_dot;
+}} {feature_dot_decimals};
+"""
+    wholefile = '\n'.join([ preamble, setup, lookups, features ])
     with open('mods.fea', 'w') as f:
-        f.write(feature)
+        f.write(wholefile)
+    #for line, txt in enumerate(wholefile.split('\n')):
+    #    print(line + 1, txt)
 
 def shift_layer(layer, shift):
     layer = layer.dup()
@@ -128,26 +170,30 @@ def shift_layer(layer, shift):
     layer.transform(mat)
     return layer
 
-def squish_layer(layer, squish):
+def squish_layer(layer, squish, squishy):
     layer = layer.dup()
-    mat = psMat.scale(squish, 1.0)
+    mat = psMat.scale(squish, squishy)
     layer.transform(mat)
     return layer
 
-def add_comma_to(glyph, comma_glyph, spaceless):
+def insert_separator(glyph, comma_glyph, gap_size, monospace):
     comma_layer = comma_glyph.layers[1].dup()
-    x_shift = glyph.width
-    y_shift = 0
-    if spaceless:
-        mat = psMat.scale(0.8, 0.8)
-        comma_layer.transform(mat)
-        x_shift -= comma_glyph.width / 2
-        # y_shift = -200
-    mat = psMat.translate(x_shift, y_shift)
+    x_shift = (abs(gap_size) - comma_glyph.width) / 2
+    if gap_size < 0:
+        x_shift += glyph.width
+    if monospace:
+        if gap_size < 0:
+            x_shift -= abs(gap_size)
+    else:
+        if gap_size > 0:
+            mat = psMat.translate(gap_size, 0)
+            glyph.transform(mat)
+        else:
+            glyph.width += abs(gap_size)
+
+    mat = psMat.translate(x_shift, 0)
     comma_layer.transform(mat)
     glyph.layers[1] += comma_layer
-    if not spaceless:
-        glyph.width += comma_glyph.width
 
 def annotate_glyph(glyph, extra_glyph):
     layer = extra_glyph.layers[1].dup()
@@ -162,45 +208,34 @@ def annotate_glyph(glyph, extra_glyph):
     glyph.layers[1] += layer
 
 def out_path(name):
-    return 'out/{0}.ttf'.format(name)
+    return f'out/{name}.ttf'
 
-def patch_one_font(font, rename_font, add_underlines, shift_amount, squish, squish_all, add_commas, spaceless_commas, debug_annotate, do_decimals, group, sub_font):
+def patch_one_font(font, rename_font, feature_name, monospace, gap_size, squish, squishy, squish_all, debug_annotate):
     font.encoding = 'ISO10646'
+    names = deferred_map(lambda o: o.glyphname, font)
+    sizes = deferred_map(lambda o: o.width, font)
 
-    if group:
-        add_underlines = False
-        shift_amount = 100
-        squish = 0.85
-        squish_all = True
-
-    mod_name = 'N'
-    if add_commas:
-        if spaceless_commas:
-            mod_name += 'onoCommas'
+    if isinstance(gap_size, str):
+        if len(gap_size) == 1:
+            gap_size = sizes[gap_size]
+            if gap_size == sizes['0']: gap_size = sizes['0'] // 3
         else:
-            mod_name += 'ommas'
-    if add_underlines:
-        mod_name += 'umderline'
-    if sub_font is not None:
-        mod_name += 'Sub'
-    # Cleaner name for what I expect to be a common combination
-    if shift_amount == 100 and squish == 0.85 and squish_all:
-        mod_name += 'Group'
-    else:
-        if shift_amount != 0:
-            mod_name += 'Shift{}'.format(shift_amount)
-        if squish != 1.0:
-            squish_s = '{}'.format(squish)
-            mod_name += 'Squish{}'.format(squish_s.replace('.','p'))
-            if squish_all:
-                mod_name += 'All'
-    if debug_annotate:
-        mod_name += 'Debug'
-    if not do_decimals:
-        mod_name += 'NoDecimals'
+            gap_size = int(gap_size)
 
     # Rename font
     if rename_font:
+        mod_name = 'DigitGrouping'
+        if gap_size != 0:
+            mod_name += f'Gap{gap_size}'
+            if squish != 1.0:
+                mod_name += f'Squish{squish}'
+            if squishy != 1.0:
+                mod_name += f'SquishY{squishy}'
+        if debug_annotate:
+            mod_name += f'Debug{random.randrange(65536):04X}'
+
+        mod_name = mod_name.replace('.', 'p')
+
         font.familyname += ' with '+mod_name
         font.fullname += ' with '+mod_name
         fontname, style = FONT_NAME_RE.match(font.fontname).groups()
@@ -212,62 +247,94 @@ def patch_one_font(font, rename_font, add_underlines, shift_amount, squish, squi
         font.appendSFNTName(
             'English (US)', 'Compatible Full', font.fullname)
 
-    digit_names = [font[code].glyphname for code in range(ord('0'),ord('9')+1)]
-    test_names = [font[code].glyphname for code in range(ord('A'),ord('J')+1)]
-    underscore_name = font[ord('_')].glyphname
-    dot_name = font[ord('.')].glyphname
-    # print(digit_names)
+    print(f'Sizes of dot: {sizes["."]}  comma: {sizes[","]}  space: {sizes[" "]}  zero: {sizes["0"]}  Gap: {gap_size}')
+    # print(f'Squish: {squish}, recommended: {(3 * sizes["0"] - gap_size) / (3 * sizes["0"])}')
 
-    if sub_font is not None:
-        sub_font = fontforge.open(sub_font.name)
-
-    underscore_layer = font[underscore_name].layers[1]
-
-    # 0xE900 starts an area spanning until 0xF000 that as far as I can tell nothing
-    # popular uses. I checked the Apple glyph browser and Nerd Font.
-    # Uses an array because of python closure capture semantics
-    encoding_alloc = [0xE900]
-    def make_copy(src_font, loc, to_name, add_underscore, add_comma, shift, squish, annotate_with):
-        encoding = encoding_alloc[0]
-        src_font.selection.select(loc)
-        src_font.copy()
-        font.selection.select(encoding)
+    def make_copy(to_name, from_name, shift, gap_size, separator = None, annotation = None):
+        font.selection.select(from_name)
+        font.copy()
+        glyph = font.createChar(-1, to_name)
+        font.selection.select(glyph)
         font.paste()
-        glyph = font[encoding]
-        glyph.glyphname = to_name
         if squish != 1.0:
-            glyph.layers[1] = squish_layer(glyph.layers[1], squish)
+            glyph.layers[1] = squish_layer(glyph.layers[1], squish, squishy)
         if shift != 0:
             glyph.layers[1] = shift_layer(glyph.layers[1], shift)
-        if add_underscore:
-            glyph.layers[1] += underscore_layer
-        if add_comma:
-            add_comma_to(glyph, font[ord(',')], spaceless_commas)
-        if annotate_with is not None:
-            annotate_glyph(glyph, annotate_with)
-        encoding_alloc[0] += 1
+        if separator is not None:
+            insert_separator(glyph, font[ord(separator)], gap_size, monospace)
+        if annotation is not None:
+            annotate_glyph(glyph, font[annotation])
 
-    for copy_i in range(0,NUM_DIGIT_COPIES):
-        for digit_i in range(0,10):
-            shift = 0
-            if copy_i % 3 == 0:
-                shift = -shift_amount
-            elif copy_i % 3 == 2:
-                shift = shift_amount
-            in_alternating_group = (copy_i >= 3 and copy_i < 6)
-            add_underscore = add_underlines and in_alternating_group
-            add_comma = add_commas and (copy_i == 3 or copy_i == 6)
-            annotate_with = font[digit_names[copy_i]] if debug_annotate else None
-            use_sub_font = (sub_font is not None) and in_alternating_group
-            src_font = sub_font if use_sub_font else font
-            make_copy(src_font, digit_names[digit_i], 'nd{}.{}'.format(copy_i,digit_i), add_underscore, add_comma, shift, squish, annotate_with)
+    shift_step = gap_size / 3 if monospace else 0
+    shift = shift_step * 2.5
+    digit_groups = {
+            "digits": [ names[d] for d in DECIMAL_LIST ],
+            "xdigits": [ names[d] for d in HEXADECIMAL_LIST ],
+            }
+
+    for group, sep, right, digits, anno in [
+            ( 'xgroup_L',      ' ', False, HEXADECIMAL_LIST, '<' ),
+            ( 'group_R',       ' ',  True, DECIMAL_LIST,     '>' ),
+            ( 'group_L_dot',   '.', False, DECIMAL_LIST,     '[' ),
+            ( 'group_R_dot',   '.',  True, DECIMAL_LIST,     ']' ),
+            ( 'group_L_comma', ',', False, DECIMAL_LIST,     '(' ),
+            ( 'group_R_comma', ',',  True, DECIMAL_LIST,     ')' ),
+            ]:
+        anno = names[anno] if debug_annotate else None
+        table = []
+        for digit_i, digit in enumerate(digits):
+            name = group + f'_d{digit_i}'
+            if right:
+                make_copy(name, names[digit], -shift, -gap_size, sep, anno)
+            else:
+                make_copy(name, names[digit], shift, gap_size, sep, anno)
+            table.append(name)
+        digit_groups[group] = table
+        if group[0] == 'x': digit_groups[group[1:]] = table[:10]
+
+    if monospace:
+        for step, group, right, digits, anno in [
+                ( shift_step, 'xphase1_L', False, HEXADECIMAL_LIST, '1' ),
+                ( 0,           'phase1_R',  True, DECIMAL_LIST,     '9' ),
+                ( shift_step, 'xphase2_L', False, HEXADECIMAL_LIST, '2' ),
+                ( 0,           'phase2_R',  True, DECIMAL_LIST,     '8' ),
+                ]:
+            anno = names[anno] if debug_annotate else None
+            shift -= step
+            table = []
+            for digit_i, digit in enumerate(digits):
+                name = group + f'_d{digit_i}'
+                if right:
+                    make_copy(name, digit, -shift, -gap_size, None, anno)
+                else:
+                    make_copy(name, digit, shift, gap_size, None, anno)
+                table.append(name)
+            digit_groups[group] = table
+            if group[0] == 'x': digit_groups[group[1:]] = table[:10]
+
+    # create placeholder glyphs, not to be rendered.
+    font.selection.select(ord(' '))  # prefer select(0x2007) which is space the same width as '0', but may not exist
+    font.copyReference()
+    for group, digits in [
+            ( 'xcapture_L', HEXADECIMAL_LIST ),
+            ( 'capture_L', DECIMAL_LIST ),
+            ( 'capture_R', DECIMAL_LIST ),
+            ]:
+        table = []
+        for digit_i, digit in enumerate(digits):
+            name = group + f'_d{digit_i}'
+            table.append(name)
+            font.selection.select(font.createChar(-1, name))
+            #font.selection.select(name)
+            font.paste()
+        digit_groups[group] = table
 
     if squish_all and squish != 1.0:
-        for digit in digit_names:
+        for digit in DECIMAL_LIST:
             glyph = font[digit]
-            glyph.layers[1] = squish_layer(glyph.layers[1], squish)
+            glyph.layers[1] = squish_layer(glyph.layers[1], squish, squishy)
 
-    gen_feature(digit_names, underscore_name, dot_name, do_decimals)
+    gen_feature(names, digit_groups, monospace, feature_name)
 
     font.generate('out/tmp.ttf')
     ft_font = TTFont('out/tmp.ttf')
@@ -277,101 +344,49 @@ def patch_one_font(font, rename_font, add_underlines, shift_amount, squish, squi
     ft_font.save(out_path(out_name))
     print("> Created '{}'".format(out_name))
 
-    if sub_font is not None:
-        sub_font.close()
-
     return out_name
 
 
-def patch_fonts(target_files, *args):
+def patch_fonts(target_fonts, **kwargs):
     res = None
-    for target_file in target_files:
+    for target_file in target_fonts:
         target_font = fontforge.open(target_file.name)
         try:
-            res = patch_one_font(target_font, *args)
+            res = patch_one_font(target_font, **kwargs)
         finally:
             target_font.close()
     return res
 
-def source_font_path(weight, is_italic):
-    suffix = weight
-    if is_italic and weight == 'Regular':
-        suffix = ''
-    if is_italic:
-        suffix += 'It'
-    return "fonts/source-code-pro/SourceCodePro-{}.ttf".format(suffix)
-
-def build_release():
-    infos = {
-        'DejaVuSansMono' : {'prefix': 'fonts/dejavu/DejaVuSansMono', 'suffixes': ['', '-Bold', '-Oblique', '-BoldOblique']},
-        'DejaVuSans' : {'prefix': 'fonts/dejavu/DejaVuSans', 'suffixes': ['', '-Bold', '-Oblique', '-BoldOblique']},
-        'UbuntuMono' : {'prefix': 'fonts/ubuntu/UbuntuMono', 'suffixes': ['-R', '-B', '-RI', '-BI']},
-        'Hack' : {'prefix': 'fonts/hack/Hack', 'suffixes': ['-Regular', '-Bold', '-Italic', '-BoldItalic']},
-        'SauceCode' : {'prefix': 'fonts/source-code-pro/SourceCodePro', 'suffixes': ['-Regular', '-Light', '-Bold', '-It', '-BoldIt']},
-    }
-
-    to_build = [
-        ('debug', 'DejaVuSansMono', ['fonts/dejavu/DejaVuSansMono.ttf', '--no-underline', '--debug-annotate'])
-        # ['fonts/source-code-pro/SourceCodePro-Light.ttf', '--no-underline', '--sub-font', 'fonts/source-code-pro/SourceCodePro-Regular.ttf']
-    ]
-
-    def for_all_weights(name, set_name, opts):
-        info = infos[name]
-        for suffix in info['suffixes']:
-            to_build.append((set_name, name, ['{}{}.ttf'.format(info['prefix'], suffix)]+opts))
-
-    for name in ['DejaVuSansMono', 'UbuntuMono', 'SauceCode']:
-        for_all_weights(name, 'numderline', [])
-
-    for_all_weights('DejaVuSans', 'nommas', ['--no-underline', '--add-commas', '--no-decimals'])
-
-    all_monospace = ['DejaVuSansMono', 'UbuntuMono', 'Hack', 'SauceCode']
-    for name in all_monospace:
-        for_all_weights(name, 'ngroup', ['--no-underline', '--group'])
-    for name in all_monospace:
-        for_all_weights(name, 'monocommas', ['--no-underline', '--group', '--add-commas', '--spaceless-commas', '--no-decimals'])
-
-    source_sub_series = ['Regular', 'Semibold', 'Bold', 'Black']
-    for i, weight in enumerate(source_sub_series[:-1]):
-        for it in [False, True]:
-            bolder = source_sub_series[i+1]
-            to_build.append(('nbold','SauceCode',[source_font_path(weight, it), '--no-underline', '--sub-font', source_font_path(bolder, it)]))
-
-
-    manifest = defaultdict(lambda: defaultdict(lambda: []))
-    for set_name, font_id, args in to_build:
-        out_name = main(args)
-        if out_name is None:
-            raise Exception("Build failed")
-        manifest[set_name][font_id].append(out_name)
-
-    print(manifest)
-
-    for variant, fonts in manifest.items():
-        for font, weights in fonts.items():
-            archive_name = "{}-{}".format(font, variant)
-            with zipfile.ZipFile("site/downloads/{}.zip".format(archive_name), 'w', compression=zipfile.ZIP_DEFLATED) as myzip:
-                for weight in weights:
-                    myzip.write(out_path(weight), '{}/{}.ttf'.format(archive_name, weight))
-
-    with open('site/_data/manifest.json','w') as f:
-        f.write(json.dumps(manifest))
-
-    for fonts in manifest.values():
-        for weights in fonts.values():
-            subprocess.run(['woff2_compress',out_path(weights[0])])
-            shutil.copyfile("out/{}.woff2".format(weights[0]), "site/fonts/{}.woff2".format(weights[0]))
-
 
 def main(argv):
-    args = get_argparser().parse_args(argv)
+    parser = argparse.ArgumentParser(
+        description=('Font patcher for Numderline. '
+                     'Requires FontForge with Python bindings. '
+                     'Stores the patched font as a new, renamed font file by default.')
+    )
+    parser.add_argument('target_fonts', help='font files to patch', metavar='font',
+                        nargs='*', type=argparse.FileType('rb'))
+    parser.add_argument('--no-rename',
+                        help='don\'t add " with Numderline" to the font name',
+                        default=True, action='store_false', dest='rename_font')
+    parser.add_argument('--feature-name',
+                        help='feature name to use to enable ligation, try "calt" for always-on',
+                        type=str, default="dgsp")
+    parser.add_argument('--monospace',
+                        help='squish all numbers, including decimals and ones less than 4 digits, use with --squish flag',
+                        default=False, action='store_true')
+    parser.add_argument('--gap-size', help='size of space for thousand separator, try 300 or ","', type=str, default=",")
+    parser.add_argument('--squish', help='horizontal scale to apply to the digits to maybe make them more readable when shifted', type=float, default=1.0)
+    parser.add_argument('--squishy', help='vertical scale to apply to the digits to balance horizontal squish', type=float, default=1.0)
+    parser.add_argument('--squish-all',
+                        help='squish all numbers, including decimals and ones less than 4 digits, use with --squish flag',
+                        default=False, action='store_true')
+    parser.add_argument('--debug-annotate',
+                        help='annotate glyph copies with debug digits',
+                        default=False, action='store_true')
+    args = parser.parse_args(argv)
 
-    if args.build_release:
-        build_release()
-        return
-
-    return patch_fonts(args.target_fonts, args.rename_font, args.add_underlines, args.shift_amount, args.squish, args.squish_all,
-        args.add_commas, args.spaceless_commas, args.debug_annotate, args.do_decimals, args.group, args.sub_font)
+    return patch_fonts(**vars(args))
 
 
 main(sys.argv[1:])
