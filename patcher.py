@@ -112,7 +112,7 @@ lookup REFLOW_DIGITS {{
     {ifdef("xphase2_L")} sub @xphase1_L @xcapture_L' by @xphase2_L;
     {ifdef("xphase3_L")} sub @xphase2_L @xcapture_L' by @xphase3_L;
 
-    {ifdef("phase2_R")} sub [ @group_R {dot_name} {comma_name} ] @capture_R' by @phase2_R;
+    {ifdef("phase2_R")} sub [ @group_R {dot_name} {comma_name} ] @capture_R' @capture_R @group_R by @phase2_R;
     {ifdef("phase2_R")} sub @phase2_R @capture_R' by @phase1_R;
 
     sub @capture_L' by @digits;
