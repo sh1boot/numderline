@@ -34,11 +34,6 @@
         /*src: url("out/merged.ttf");*/
       }
 
-      .font-test-plain {
-        font-family: "myFont";
-        font-feature-settings: -"dgsp";
-      }
-
       .font-test {
         font-family: "myFont";
         font-feature-settings: "dgsp";
@@ -46,6 +41,11 @@
 
       .big {
         font-size: 18pt;
+      }
+
+      .font-test-plain {
+        font-family: "myFont";
+        font-feature-settings: -"dgsp";
       }
 
       .comma-thousands {
@@ -89,6 +89,7 @@ the quick brown fox jumps over the lazy dog
 1234567 123423,124356.0000000</textarea>
 <div class="container" style="display: flex;">
     <div class="font-test-plain" align="right">
+<div align="center">""</div>
          3141<br/>
         31415<br/>
      31415926<br/>
@@ -100,12 +101,22 @@ the quick brown fox jumps over the lazy dog
   0x271828182<br/>
  0x2718281828<br/>
 0x27182818284<br/>
+     123.4567<br/>
+    123.45678<br/>
    123.456789<br/>
   123.4567890<br/>
  123.45678901<br/>
+ a million dollars! ($10000000.00)<br/>
+ in the range 1..1000<br/>
+ in the range 1.23..10.34<br/>
+ c = (10000,20000)<br/>
+ c = (1.5000,2.4000)<br/>
+&amp;thinsp;: 12&thinsp;345<br/>
+raw: 12345
     </div>
-    <div width="300"> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </div>
+    <div> &numsp; </div>
     <div class="font-test" align="right">
+<div align="center">"dgsp"</div>
          3141<br/>
         31415<br/>
      31415926<br/>
@@ -117,56 +128,78 @@ the quick brown fox jumps over the lazy dog
   0x271828182<br/>
  0x2718281828<br/>
 0x27182818284<br/>
+     123.4567<br/>
+    123.45678<br/>
    123.456789<br/>
   123.4567890<br/>
  123.45678901<br/>
+ a million dollars! ($10000000.00)<br/>
+ in the range 1..1000<br/>
+ in the range 1.23..10.34<br/>
+ c = (10000,20000)<br/>
+ c = (1.5000,2.4000)<br/>
+&amp;thinsp;: 12&thinsp;345<br/>
+raw: 12345
+    </div>
+    <div> &numsp; </div>
+    <div class="font-test comma-decimals" align="right">
+<div align="center">"dgcd"</div>
+         3141<br/>
+        31415<br/>
+     31415926<br/>
+    314159265<br/>
+   3141592653<br/>
+  31415926535<br/>
+    0x2718281<br/>
+   0x27182818<br/>
+  0x271828182<br/>
+ 0x2718281828<br/>
+0x27182818284<br/>
+     123.4567<br/>
+    123.45678<br/>
+   123.456789<br/>
+  123.4567890<br/>
+ 123.45678901<br/>
+ a million dollars! ($10000000.00)<br/>
+ in the range 1..1000<br/>
+ in the range 1.23..10.34<br/>
+ c = (10000,20000)<br/>
+ c = (1.5000,2.4000)<br/>
+&amp;thinsp;: 12&thinsp;345<br/>
+raw: 12345
+    </div>
+    <div> &numsp; </div>
+    <div class="font-test dot-decimals" align="right">
+<div align="center">"dgdd"</div>
+         3141<br/>
+        31415<br/>
+     31415926<br/>
+    314159265<br/>
+   3141592653<br/>
+  31415926535<br/>
+    0x2718281<br/>
+   0x27182818<br/>
+  0x271828182<br/>
+ 0x2718281828<br/>
+0x27182818284<br/>
+     123.4567<br/>
+    123.45678<br/>
+   123.456789<br/>
+  123.4567890<br/>
+ 123.45678901<br/>
+ a million dollars! ($10000000.00)<br/>
+ in the range 1..1000<br/>
+ in the range 1.23..10.34<br/>
+ c = (10000,20000)<br/>
+ c = (1.5000,2.4000)<br/>
+&amp;thinsp;: 12&thinsp;345<br/>
+raw: 12345
     </div>
 </div>
-    <pre class="font-test">
-standard thousands+decimals
-1234567890 1234.4567890  1234567890..1234.4567890
---
-1234567890 1234,4567890  1234567890..1234,4567890
---
-0x1234567890 0x1234.456aBc0  0x1234567890..0x1aBc.4567890
---
-0x1234567890 0x1234,456aBc0  0x1234567890..0x1AbC,4567890
-    </pre>
-    <pre class="font-test comma-decimals">
-comma thousands+decimals
-1234567890 1234.4567890  1234567890..1234.4567890
---
-1234567890 1234,4567890  1234567890..1234,4567890
---
-0x1234567890 0x1234.456aBc0  0x1234567890..0x1aBc.4567890
---
-0x1234567890 0x1234,456aBc0  0x1234567890..0x1AbC,4567890
-    </pre>
-    <pre class="font-test dot-decimals">
-dot thousands+decimals
-1234567890 1234.4567890  1234567890..1234.4567890
---
-1234567890 1234,4567890  1234567890..1234,4567890
---
-0x1234567890 1234.4567890  0x1234567890..1234.4567890
---
-0x1234567890 1234,4567890  0x1234567890..1234,4567890
-    </pre>
     <pre class="font-test">
 the quick brown fox jumps over the lazy dog
 this <= that && why == zeven === five >>= lol
 hamburgefont
-1234.1~1
-1234.12~2
-1234.123~3
-1234.1234~4
-1234.12345~5
-1234.123456~6
-1234.1234567~7
-1234.12345678~8
-1234.123456789~9
-1234.1234567890~0
-
 1
 12
 123
@@ -187,35 +220,17 @@ hamburgefont
 123456789012345678
 1234567890123456789
 12345678901234567890
-0x
-0x1
-0x12
-0x123
-0x1234
-0x12345
-0x123456
-0x1234567
-0x12345678
-0x123456789
-0x1234567890
-0x12345678901
-0x123456789012
-0x1234567890123
-0x12345678901234
-0x123456789012345
-0x1234567890123456
-0x12345678901234567
-0x123456789012345678
-0x1234567890123456789
-0x12345678901234567890
 
-  3456..5678
- 23456..45678
-123456..345678
-
-  3456.88..5678.9999
- 23456.88..45678.9999
-123456.88..345678.9999
+1234.1
+1234.12
+1234.123
+1234.1234
+1234.12345
+1234.123456
+1234.1234567
+1234.12345678
+1234.123456789
+1234.1234567890
 
 111111
 222222
