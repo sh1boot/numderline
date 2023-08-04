@@ -71,7 +71,11 @@ languagesystem kana dflt;
     m = '' if monospace else '#'
     not_m = '#' if monospace else ''
 
-    lookups = f"""lookup CAPTURE {{
+    lookups = f"""
+## Lookups are executed in the order they are listed below, regardless of the
+## order they are referenced in the feature rules that follow.
+
+lookup CAPTURE {{
     # capture digits following `.`, but not `..`
     sub {dot_name} {dot_name} @digits' by @capture_L;
     sub {dot_name} @digits' by @capture_R;
@@ -82,13 +86,12 @@ languagesystem kana dflt;
     sub @xcapture_L @xdigits' by @xcapture_L;
 
     # capture digits that didn't match above
-    sub @digits' @digits @digits @digits @digits by @capture_L;
-    sub @capture_L @digits' by @capture_L;
+    sub @digits' by @capture_L;
 }} CAPTURE;
 
 lookup DOTS_TO_COMMAS {{
     # YIKES!!
-    {ifdef("phase2_L")} sub @phase2_L {dot_name}' @phase2_R by {comma_name};
+    sub @capture_L {dot_name}' @capture_R by {comma_name};
 }} DOTS_TO_COMMAS;
 
 lookup GROUP_DIGITS {{
@@ -118,7 +121,8 @@ lookup REFLOW_DIGITS {{
 }} REFLOW_DIGITS;
 """
 
-    features = f"""feature {feature_name} {{
+    features = f"""
+feature {feature_name} {{
     lookup CAPTURE;
     lookup GROUP_DIGITS;
     lookup GROUP_DECIMALS;
@@ -157,7 +161,6 @@ feature {feature_dot_decimals} {{
     lookup GROUP_DIGITS;
     lookup GROUP_DECIMALS;
     lookup REFLOW_DIGITS;
-    lookup DOTS_TO_COMMAS;
     sub @group_L' by @group_L_dot;
     sub @group_R' by @group_R_dot;
 }} {feature_dot_decimals};
@@ -180,8 +183,8 @@ def squish_layer(layer, squish, squishy):
     layer.transform(mat)
     return layer
 
-def insert_separator(glyph, comma_glyph, gap_size, monospace):
-    comma_layer = comma_glyph.layers[1].dup()
+def insert_separator(glyph, comma_glyph, gap_size, monospace, l=1):
+    comma_layer = comma_glyph.layers[l].dup()
     x_shift = (abs(gap_size) - comma_glyph.width) / 2
     if gap_size < 0:
         x_shift += glyph.width
@@ -197,10 +200,10 @@ def insert_separator(glyph, comma_glyph, gap_size, monospace):
 
     mat = psMat.translate(x_shift, 0)
     comma_layer.transform(mat)
-    glyph.layers[1] += comma_layer
+    glyph.layers[l] += comma_layer
 
-def annotate_glyph(glyph, extra_glyph):
-    layer = extra_glyph.layers[1].dup()
+def annotate_glyph(glyph, extra_glyph, l=1):
+    layer = extra_glyph.layers[l].dup()
     mat = psMat.translate(-(extra_glyph.width/2), 0)
     layer.transform(mat)
     mat = psMat.scale(0.3, 0.3)
@@ -209,7 +212,7 @@ def annotate_glyph(glyph, extra_glyph):
     layer.transform(mat)
     mat = psMat.translate(0, -600)
     layer.transform(mat)
-    glyph.layers[1] += layer
+    glyph.layers[l] += layer
 
 def out_path(name):
     return f'out/{name}.ttf'
@@ -254,20 +257,24 @@ def patch_one_font(font, rename_font, feature_name, monospace, gap_size, squish,
     print(f'Sizes of dot: {sizes["."]}  comma: {sizes[","]}  space: {sizes[" "]}  zero: {sizes["0"]}  Gap: {gap_size}')
     # print(f'Squish: {squish}, recommended: {(3 * sizes["0"] - gap_size) / (3 * sizes["0"])}')
 
-    def make_copy(to_name, from_name, shift, gap_size, separator = None, annotation = None):
+    layer = 1  # is it ever anything else?
+
+    def make_copy(to_name, from_name, shift, gap_size=0, separator=None, annotation=None):
         font.selection.select(from_name)
         font.copy()
         glyph = font.createChar(-1, to_name)
         font.selection.select(glyph)
         font.paste()
         if squish != 1.0:
-            glyph.layers[1] = squish_layer(glyph.layers[1], squish, squishy)
+            glyph.layers[layer] = squish_layer(glyph.layers[layer], squish, squishy)
         if shift != 0:
-            glyph.layers[1] = shift_layer(glyph.layers[1], shift)
+            glyph.layers[layer] = shift_layer(glyph.layers[layer], shift)
         if separator is not None:
-            insert_separator(glyph, font[ord(separator)], gap_size, monospace)
+            insert_separator(glyph, font[ord(separator)], gap_size, monospace, layer)
+        else:
+            glyph.width += gap_size
         if annotation is not None:
-            annotate_glyph(glyph, font[annotation])
+            annotate_glyph(glyph, font[annotation], layer)
 
     shift_step = gap_size / 3 if monospace else 0
     shift = shift_step * 2.5
@@ -309,9 +316,9 @@ def patch_one_font(font, rename_font, feature_name, monospace, gap_size, squish,
             for digit_i, digit in enumerate(digits):
                 name = group + f'_d{digit_i}'
                 if right:
-                    make_copy(name, digit, -shift, -gap_size, None, anno)
+                    make_copy(name, digit, -shift, annotation=anno)
                 else:
-                    make_copy(name, digit, shift, gap_size, None, anno)
+                    make_copy(name, digit, shift, annotation=anno)
                 table.append(name)
             digit_groups[group] = table
             if group[0] == 'x': digit_groups[group[1:]] = table[:10]
@@ -336,7 +343,7 @@ def patch_one_font(font, rename_font, feature_name, monospace, gap_size, squish,
     if squish_all and squish != 1.0:
         for digit in DECIMAL_LIST:
             glyph = font[digit]
-            glyph.layers[1] = squish_layer(glyph.layers[1], squish, squishy)
+            glyph.layers[layer] = squish_layer(glyph.layers[layer], squish, squishy)
 
     gen_feature(names, digit_groups, monospace, feature_name)
 
@@ -346,7 +353,7 @@ def patch_one_font(font, rename_font, feature_name, monospace, gap_size, squish,
     # replacement to comply with SIL Open Font License
     out_name = font.fullname.replace('Source ', 'Sauce ')
     ft_font.save(out_path(out_name))
-    print("> Created '{}'".format(out_name))
+    print(f"> Created '{out_name}'")
 
     return out_name
 
@@ -354,11 +361,12 @@ def patch_one_font(font, rename_font, feature_name, monospace, gap_size, squish,
 def patch_fonts(target_fonts, **kwargs):
     res = None
     for target_file in target_fonts:
-        target_font = fontforge.open(target_file.name)
-        try:
-            res = patch_one_font(target_font, **kwargs)
-        finally:
-            target_font.close()
+        for font in fontforge.fontsInFile(target_file.name):
+            target_font = fontforge.open(f'{target_file.name}({font})')
+            try:
+                res = patch_one_font(target_font, **kwargs)
+            finally:
+                target_font.close()
     return res
 
 
