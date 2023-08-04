@@ -4,7 +4,9 @@ becoming kind of its own thing as I hack around.
 
 Allows the rendering of digit grouping (thousand separators) in contexts where
 you have some control over the font but don't want to (or can't) edit the text
-inline.
+inline.  It looks a bit like this:
+
+![sample](./sample.png)
 
 This is achieved by adding font features to font files which enable outboard
 configuration of number formatting.
@@ -53,6 +55,9 @@ or, in fontconfig:
          </edit>
      </match>
 ```
+
+Here's some other documentation about using stylistic sets (just change `ss01` to `dgsp`):
+ - https://github.com/tonsky/FiraCode/wiki/How-to-enable-stylistic-sets
 
 Or if all of that is too much hassle or isn't working out right, just bake it
 in as the default, by passing `--feature-name=calt` to the patcher.
