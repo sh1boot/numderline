@@ -229,10 +229,12 @@ def patch_one_font(font, rename_font, feature_name, monospace, gap_size, squish,
         else:
             gap_size = int(gap_size)
 
+    default_gap_size = sizes['0'] // 3 if monospace else 0
+
     # Rename font
     if rename_font:
         mod_name = 'DigitGrouping'
-        if gap_size != 0:
+        if gap_size != default_gap_size:
             mod_name += f'Gap{gap_size}'
             if squish != 1.0:
                 mod_name += f'Squish{squish}'
@@ -259,7 +261,17 @@ def patch_one_font(font, rename_font, feature_name, monospace, gap_size, squish,
 
     layer = 1  # is it ever anything else?
 
+    def real_name(name):
+        # if a glyph contains a reference then just assume that's where
+        # the real glyph is.  Maybe there's an easy way to accumulate the
+        # references in the outline layers instead?
+        while True:
+            src = font[name]
+            if not src.references: return name
+            name = src.references[0][0]
+
     def make_copy(to_name, from_name, shift, gap_size=0, separator=None, annotation=None):
+        from_name = real_name(from_name)
         font.selection.select(from_name)
         font.copy()
         glyph = font.createChar(-1, to_name)
@@ -270,7 +282,7 @@ def patch_one_font(font, rename_font, feature_name, monospace, gap_size, squish,
         if shift != 0:
             glyph.layers[layer] = shift_layer(glyph.layers[layer], shift)
         if separator is not None:
-            insert_separator(glyph, font[ord(separator)], gap_size, monospace, layer)
+            insert_separator(glyph, font[real_name(ord(separator))], gap_size, monospace, layer)
         else:
             glyph.width += gap_size
         if annotation is not None:
@@ -316,9 +328,9 @@ def patch_one_font(font, rename_font, feature_name, monospace, gap_size, squish,
             for digit_i, digit in enumerate(digits):
                 name = group + f'_d{digit_i}'
                 if right:
-                    make_copy(name, digit, -shift, annotation=anno)
+                    make_copy(name, names[digit], -shift, annotation=anno)
                 else:
-                    make_copy(name, digit, shift, annotation=anno)
+                    make_copy(name, names[digit], shift, annotation=anno)
                 table.append(name)
             digit_groups[group] = table
             if group[0] == 'x': digit_groups[group[1:]] = table[:10]
