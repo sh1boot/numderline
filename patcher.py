@@ -171,48 +171,33 @@ feature {feature_dot_decimals} {{
     #for line, txt in enumerate(wholefile.split('\n')):
     #    print(line + 1, txt)
 
-def shift_layer(layer, shift):
-    layer = layer.dup()
-    mat = psMat.translate(shift, 0)
-    layer.transform(mat)
-    return layer
-
-def squish_layer(layer, squish, squishy):
-    layer = layer.dup()
-    mat = psMat.scale(squish, squishy)
-    layer.transform(mat)
-    return layer
-
-def insert_separator(glyph, comma_glyph, gap_size, monospace, l=1):
-    comma_layer = comma_glyph.layers[l].dup()
-    x_shift = (abs(gap_size) - comma_glyph.width) / 2
-    if gap_size < 0:
-        x_shift += glyph.width
-    if monospace:
+def resize_glyph(glyph, font, from_name, gap_size, monospace):
+    glyph.useRefsMetrics(from_name)
+    if not monospace:
+        # Doing this and then undoing it leaves us with a better
+        # state than if we don't do it at all.
+        glyph.useRefsMetrics(from_name, False)
         if gap_size < 0:
-            x_shift -= abs(gap_size)
-    else:
-        if gap_size > 0:
-            mat = psMat.translate(gap_size, 0)
-            glyph.transform(mat)
-        else:
             glyph.width += abs(gap_size)
+        else:
+            # glyph seems to grow on its own with this transform
+            mat = psMat.translate(abs(gap_size), 0)
+            glyph.transform(mat)
 
+def insert_separator(glyph, font, separator, gap_size, monospace):
+    x_shift = (abs(gap_size) - font[separator].width) // 2
+    if gap_size < 0:
+        x_shift = glyph.width - abs(gap_size) + x_shift
     mat = psMat.translate(x_shift, 0)
-    comma_layer.transform(mat)
-    glyph.layers[l] += comma_layer
+    glyph.addReference(separator, mat)
 
-def annotate_glyph(glyph, extra_glyph, l=1):
-    layer = extra_glyph.layers[l].dup()
-    mat = psMat.translate(-(extra_glyph.width/2), 0)
-    layer.transform(mat)
-    mat = psMat.scale(0.3, 0.3)
-    layer.transform(mat)
-    mat = psMat.translate((extra_glyph.width/2), 0)
-    layer.transform(mat)
-    mat = psMat.translate(0, -600)
-    layer.transform(mat)
-    glyph.layers[l] += layer
+def annotate_glyph(glyph, font, annotation):
+    anno_width = font[annotation].width
+    mat = psMat.translate(-anno_width / 2, 0)
+    mat = psMat.compose(mat, psMat.scale(0.3, 0.3))
+    mat = psMat.compose(mat, psMat.translate(glyph.width / 2, 0))
+    mat = psMat.compose(mat, psMat.translate(0, -300))
+    glyph.addReference(annotation, mat)
 
 def out_path(name):
     return f'out/{name}.ttf'
@@ -225,28 +210,29 @@ def patch_one_font(font, rename_font, feature_name, monospace, gap_size, squish,
     if isinstance(gap_size, str):
         if len(gap_size) == 1:
             gap_size = sizes[gap_size]
+            # if suggested gap size is the size of a 0 it's probably
+            # a monospaced font, so use the default monospace gap.
             if gap_size == sizes['0']: gap_size = sizes['0'] // 3
         else:
             gap_size = int(gap_size)
 
-    default_gap_size = sizes['0'] // 3 if monospace else 0
+    default_gap_size = sizes['0'] // 3 if monospace else sizes[',']
 
-    # Rename font
     if rename_font:
-        mod_name = 'DigitGrouping'
+        mod_name = 'DG'
         if gap_size != default_gap_size:
-            mod_name += f'Gap{gap_size}'
-            if squish != 1.0:
-                mod_name += f'Squish{squish}'
+            mod_name += f'_G{gap_size}'
+        if squish != 1.0:
+            mod_name += f'_S{squish}'
             if squishy != 1.0:
-                mod_name += f'SquishY{squishy}'
+                mod_name += f'x{squishy}'
         if debug_annotate:
-            mod_name += f'Debug{random.randrange(65536):04X}'
+            mod_name += f'_Dbg{random.randrange(65536):04X}'
 
         mod_name = mod_name.replace('.', 'p')
 
-        font.familyname += ' with '+mod_name
-        font.fullname += ' with '+mod_name
+        font.familyname += ' ' + mod_name
+        font.fullname += ' ' + mod_name
         fontname, style = FONT_NAME_RE.match(font.fontname).groups()
         font.fontname = fontname + 'With' + mod_name
         if style is not None:
@@ -257,36 +243,18 @@ def patch_one_font(font, rename_font, feature_name, monospace, gap_size, squish,
             'English (US)', 'Compatible Full', font.fullname)
 
     print(f'Sizes of dot: {sizes["."]}  comma: {sizes[","]}  space: {sizes[" "]}  zero: {sizes["0"]}  Gap: {gap_size}')
-    # print(f'Squish: {squish}, recommended: {(3 * sizes["0"] - gap_size) / (3 * sizes["0"])}')
-
-    layer = 1  # is it ever anything else?
-
-    def real_name(name):
-        # if a glyph contains a reference then just assume that's where
-        # the real glyph is.  Maybe there's an easy way to accumulate the
-        # references in the outline layers instead?
-        while True:
-            src = font[name]
-            if not src.references: return name
-            name = src.references[0][0]
 
     def make_copy(to_name, from_name, shift, gap_size=0, separator=None, annotation=None):
-        from_name = real_name(from_name)
-        font.selection.select(from_name)
-        font.copy()
         glyph = font.createChar(-1, to_name)
-        font.selection.select(glyph)
-        font.paste()
-        if squish != 1.0:
-            glyph.layers[layer] = squish_layer(glyph.layers[layer], squish, squishy)
-        if shift != 0:
-            glyph.layers[layer] = shift_layer(glyph.layers[layer], shift)
+        mat = psMat.identity()
+        if squish != 1.0: mat = psMat.compose(mat, psMat.scale(squish, squishy))
+        if shift != 0: mat = psMat.compose(mat, psMat.translate(shift, 0))
+        glyph.addReference(from_name, mat)
+        resize_glyph(glyph, font, from_name, gap_size, monospace)
         if separator is not None:
-            insert_separator(glyph, font[real_name(ord(separator))], gap_size, monospace, layer)
-        else:
-            glyph.width += gap_size
+            insert_separator(glyph, font, names[separator], gap_size, monospace)
         if annotation is not None:
-            annotate_glyph(glyph, font[annotation], layer)
+            annotate_glyph(glyph, font, names[annotation])
 
     shift_step = gap_size / 3 if monospace else 0
     shift = shift_step * 2.5
@@ -303,7 +271,7 @@ def patch_one_font(font, rename_font, feature_name, monospace, gap_size, squish,
             ( 'group_L_comma', ',', False, DECIMAL_LIST,     '(' ),
             ( 'group_R_comma', ',',  True, DECIMAL_LIST,     ')' ),
             ]:
-        anno = names[anno] if debug_annotate else None
+        if not debug_annotate: anno = None
         table = []
         for digit_i, digit in enumerate(digits):
             name = group + f'_d{digit_i}'
@@ -322,7 +290,7 @@ def patch_one_font(font, rename_font, feature_name, monospace, gap_size, squish,
                 ( shift_step, 'xphase2_L', False, HEXADECIMAL_LIST, '2' ),
                 ( 0,           'phase2_R',  True, DECIMAL_LIST,     '8' ),
                 ]:
-            anno = names[anno] if debug_annotate else None
+            if not debug_annotate: anno = None
             shift -= step
             table = []
             for digit_i, digit in enumerate(digits):
@@ -355,7 +323,7 @@ def patch_one_font(font, rename_font, feature_name, monospace, gap_size, squish,
     if squish_all and squish != 1.0:
         for digit in DECIMAL_LIST:
             glyph = font[digit]
-            glyph.layers[layer] = squish_layer(glyph.layers[layer], squish, squishy)
+            glyph.layers[1] = squish_layer(glyph.layers[1], squish, squishy)
 
     gen_feature(names, digit_groups, monospace, feature_name)
 
