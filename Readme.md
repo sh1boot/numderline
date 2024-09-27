@@ -1,3 +1,6 @@
+My hacking here got too messy, so I've [started
+over](https://github.com/sh1boot/digitgrouper/).
+
 # Numderspace
 Based substantially on [Numderline](https://github.com/trishume/numderline) but
 becoming kind of its own thing as I hack around.
